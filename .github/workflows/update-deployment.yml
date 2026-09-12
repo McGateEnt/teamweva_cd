@@ -14,24 +14,13 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: teamweva-deployment
-  cancel-in-progress: false
-
 jobs:
   update-deployment:
-    name: Deploy TeamWeva
     runs-on: ubuntu-latest
 
     env:
+      IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.inputs.image_tag }}
       IMAGE_REGISTRY: mcgatehub
-      IMAGE_NAME: teamweva
-      NAMESPACE: mcgate
-
-      WEB_DEPLOYMENT: teamweva-web
-      WEB_CONTAINER: web
-
-      POSTGRES_DEPLOYMENT: teamweva-postgres
 
     steps:
 
@@ -43,349 +32,175 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0
 
       # ============================================================
       # VALIDATE PAYLOAD
       # ============================================================
 
       - name: Validate deployment payload
-        shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            IMAGE_TAG="${{ github.event.client_payload.image_tag }}"
-          else
-            IMAGE_TAG="${{ github.event.inputs.image_tag }}"
-          fi
-
-          if [ -z "${IMAGE_TAG:-}" ]; then
+          if [ -z "$IMAGE_TAG" ]; then
             echo "ERROR: image_tag was not provided."
             exit 1
           fi
 
-          echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
-
-          IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-
           echo "=========================================="
-          echo "TEAMWEVA DEPLOYMENT"
+          echo "Deployment payload"
           echo "=========================================="
-          echo "Namespace: $NAMESPACE"
-          echo "Image:     $IMAGE"
+          echo "Image registry: $IMAGE_REGISTRY"
+          echo "Image tag:      $IMAGE_TAG"
           echo "=========================================="
 
       # ============================================================
-      # VALIDATE MANIFEST EXISTS
+      # VALIDATE MANIFEST
       # ============================================================
 
-      - name: Validate manifest exists
-        shell: bash
+      - name: Validate deployment manifest
         run: |
-          set -euo pipefail
+          set -e
 
           if [ ! -f "teamweva.yaml" ]; then
             echo "ERROR: teamweva.yaml was not found."
             exit 1
           fi
 
-          echo "teamweva.yaml found."
+          echo "Deployment manifest found."
 
       # ============================================================
-      # VERIFY KUBECTL
+      # SHOW CURRENT IMAGES
       # ============================================================
 
-      - name: Verify kubectl
-        shell: bash
+      - name: Show current deployment images
         run: |
-          set -euo pipefail
+          echo "=========================================="
+          echo "Images before update"
+          echo "=========================================="
 
-          if ! command -v kubectl >/dev/null 2>&1; then
-            echo "ERROR: kubectl is not installed."
-            exit 1
-          fi
-
-          kubectl version --client
+          grep -nE '^[[:space:]]*image:' teamweva.yaml || true
 
       # ============================================================
-      # CONFIGURE KUBERNETES CREDENTIALS
+      # UPDATE IMAGES
       # ============================================================
 
-      - name: Configure Kubernetes credentials
-        shell: bash
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+      - name: Update deployment images
         run: |
-          set -euo pipefail
+          set -e
 
-          # If KUBE_CONFIG secret is provided, install it to ~/.kube/config
-          if [ -n "${KUBE_CONFIG:-}" ]; then
-            mkdir -p "${HOME}/.kube"
-            printf '%s' "$KUBE_CONFIG" \
-              | base64 --decode \
-              > "${HOME}/.kube/config"
-            chmod 600 "${HOME}/.kube/config"
-            echo "Kubernetes credentials installed from secret."
-          elif [ -f "${HOME}/.kube/config" ]; then
-            echo "Using existing local ~/.kube/config."
+          echo "=========================================="
+          echo "Updating deployment images"
+          echo "=========================================="
+
+          echo "Registry: $IMAGE_REGISTRY"
+          echo "Tag:      $IMAGE_TAG"
+
+          # Update every mcgatehub image while preserving
+          # the image repository name (e.g. mcgatehub/teamweva:TAG).
+          sed -i -E \
+            "s|(^[[:space:]]*image:[[:space:]]*${IMAGE_REGISTRY}/[^:[:space:]]+):[^[:space:]]+|\1:${IMAGE_TAG}|g" \
+            teamweva.yaml
+
+          echo ""
+          echo "Images after update:"
+          grep -nE '^[[:space:]]*image:' teamweva.yaml || true
+
+      # ============================================================
+      # VERIFY CHANGES
+      # ============================================================
+
+      - name: Verify changes
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Checking deployment changes"
+          echo "=========================================="
+
+          git diff -- teamweva.yaml
+
+          if git diff --quiet -- teamweva.yaml; then
+            echo ""
+            echo "Notice: Deployment image was already up to date with tag ${IMAGE_TAG}."
           else
-            echo "WARNING: Neither KUBE_CONFIG secret nor ~/.kube/config found."
+            echo ""
+            echo "Deployment manifest was successfully modified."
           fi
 
       # ============================================================
-      # VERIFY CLUSTER
+      # VERIFY IMAGE TAGS
       # ============================================================
 
-      - name: Verify Kubernetes cluster
-        shell: bash
+      - name: Verify image tags
         run: |
-          set -euo pipefail
+          set -e
 
           echo "=========================================="
-          echo "KUBERNETES CLUSTER"
+          echo "Verifying image tags"
           echo "=========================================="
 
-          kubectl cluster-info
+          images=$(grep -E '^[[:space:]]*image:[[:space:]]*' teamweva.yaml |
+            sed -E 's/^[[:space:]]*image:[[:space:]]*//')
+
+          while IFS= read -r image; do
+
+            [ -z "$image" ] && continue
+
+            if [[ "$image" == "${IMAGE_REGISTRY}/"* ]]; then
+
+              if [[ "$image" != *":${IMAGE_TAG}" ]]; then
+                echo ""
+                echo "ERROR: Image does not have expected tag:"
+                echo "$image"
+                echo ""
+                echo "Expected tag:"
+                echo "$IMAGE_TAG"
+                exit 1
+              fi
+
+              echo "OK: $image"
+            fi
+
+          done <<< "$images"
 
           echo ""
-          kubectl get nodes
-
-          echo ""
-          kubectl get namespace "$NAMESPACE" || kubectl create namespace "$NAMESPACE"
+          echo "All ${IMAGE_REGISTRY} images have the expected tag."
 
       # ============================================================
-      # CONFIGURE DOCKER HUB SECRET
+      # COMMIT CHANGES
       # ============================================================
 
-      - name: Configure Docker Hub credentials
-        shell: bash
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Commit changes
         run: |
-          set -euo pipefail
+          set -e
 
-          if [ -n "${DOCKER_USERNAME:-}" ] && [ -n "${DOCKER_PASSWORD:-}" ]; then
-            kubectl create secret docker-registry mcgate-dockerhub-secret \
-              --namespace "$NAMESPACE" \
-              --docker-server="https://index.docker.io/v1/" \
-              --docker-username="$DOCKER_USERNAME" \
-              --docker-password="$DOCKER_PASSWORD" \
-              --dry-run=client \
-              -o yaml \
-              | kubectl apply -f -
-            echo "Docker Hub pull secret configured."
+          git config user.name "GitHub Actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add teamweva.yaml
+
+          if git diff --staged --quiet; then
+            echo "No changes staged for commit."
           else
-            echo "Skipping Docker Hub secret creation (using existing if present)."
+            git commit -m "Update deployment images to ${IMAGE_TAG}"
           fi
 
       # ============================================================
-      # CONFIGURE APPLICATION SECRET
+      # PUSH CHANGES (TRIGGERS ARGOCD)
       # ============================================================
 
-      - name: Configure TeamWeva application secret
-        shell: bash
-        env:
-          SECRET_KEY: ${{ secrets.TEAMWEVA_SECRET_KEY }}
-          DB_NAME: ${{ secrets.TEAMWEVA_DB_NAME }}
-          DB_USER: ${{ secrets.TEAMWEVA_DB_USER }}
-          DB_PASSWORD: ${{ secrets.TEAMWEVA_DB_PASSWORD }}
+      - name: Push changes
         run: |
-          set -euo pipefail
+          set -e
 
-          if [ -n "${SECRET_KEY:-}" ] && [ -n "${DB_NAME:-}" ]; then
-            kubectl create secret generic teamweva-secret \
-              --namespace "$NAMESPACE" \
-              --from-literal=SECRET_KEY="$SECRET_KEY" \
-              --from-literal=DB_NAME="$DB_NAME" \
-              --from-literal=DB_USER="${DB_USER:-teamweva_user}" \
-              --from-literal=DB_PASSWORD="${DB_PASSWORD:-TeamWevaProd@2026!}" \
-              --dry-run=client \
-              -o yaml \
-              | kubectl apply -f -
-            echo "TeamWeva application secret configured from GitHub secrets."
+          if git diff --staged --quiet && git diff origin/main..HEAD --quiet 2>/dev/null; then
+            echo "No commits to push."
           else
-            echo "Using base secret defined in teamweva.yaml."
+            git push origin main
           fi
 
-      # ============================================================
-      # VALIDATE KUBERNETES MANIFEST
-      # ============================================================
-
-      - name: Validate Kubernetes manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "VALIDATING KUBERNETES MANIFEST"
-          echo "=========================================="
-
-          kubectl apply \
-            --dry-run=client \
-            -f teamweva.yaml
-
-          echo ""
-          echo "Manifest validation passed."
-
-      # ============================================================
-      # APPLY BASE MANIFEST
-      # ============================================================
-
-      - name: Apply TeamWeva manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "APPLYING TEAMWEVA MANIFEST"
-          echo "=========================================="
-
-          kubectl apply \
-            -f teamweva.yaml \
-            -n "$NAMESPACE"
-
-          echo ""
-          echo "Manifest applied successfully."
-
-      # ============================================================
-      # WAIT FOR POSTGRES
-      # ============================================================
-
-      - name: Wait for PostgreSQL
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "Waiting for PostgreSQL rollout..."
-
-          kubectl rollout status \
-            deployment/"$POSTGRES_DEPLOYMENT" \
-            -n "$NAMESPACE" \
-            --timeout=5m
-
-          echo "PostgreSQL is ready."
-
-      # ============================================================
-      # UPDATE APPLICATION IMAGE
-      # ============================================================
-
-      - name: Update TeamWeva application image
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-
-          echo "=========================================="
-          echo "UPDATING APPLICATION IMAGE"
-          echo "=========================================="
-          echo "Setting image: $IMAGE"
-
-          kubectl set image \
-            deployment/"$WEB_DEPLOYMENT" \
-            "$WEB_CONTAINER=$IMAGE" \
-            -n "$NAMESPACE"
-
-      # ============================================================
-      # SHOW IMAGES
-      # ============================================================
-
-      - name: Show deployed image references
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "DEPLOYMENT IMAGE REFERENCES"
-          echo "=========================================="
-
-          kubectl get deployment \
-            "$WEB_DEPLOYMENT" \
-            -n "$NAMESPACE" \
-            -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image'
-
-      # ============================================================
-      # WATCH WEB ROLLOUT
-      # ============================================================
-
-      - name: Watch TeamWeva web rollout
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "WAITING FOR TEAMWEVA WEB ROLLOUT"
-          echo "=========================================="
-
-          kubectl rollout status \
-            deployment/"$WEB_DEPLOYMENT" \
-            -n "$NAMESPACE" \
-            --timeout=10m
-
-          echo "TeamWeva web rollout completed successfully."
-
-      # ============================================================
-      # FINAL STATUS
-      # ============================================================
-
-      - name: Verify TeamWeva deployment
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "DEPLOYMENTS"
-          echo "=========================================="
-          kubectl get deployments -n "$NAMESPACE" -l 'app in (teamweva-web,teamweva-postgres)'
-
           echo ""
           echo "=========================================="
-          echo "PODS"
-          echo "=========================================="
-          kubectl get pods -n "$NAMESPACE" -l 'app in (teamweva-web,teamweva-postgres)' -o wide
-
-          echo ""
-          echo "=========================================="
-          echo "SERVICES"
-          echo "=========================================="
-          kubectl get services -n "$NAMESPACE" -l 'app=teamweva-web'
-
-      # ============================================================
-      # FAILURE DIAGNOSTICS
-      # ============================================================
-
-      - name: TeamWeva diagnostics on failure
-        if: failure()
-        shell: bash
-        run: |
-          echo "============================================================"
-          echo "DEPLOYMENT FAILED - DIAGNOSTICS"
-          echo "============================================================"
-
-          echo "=== EVENTS ==="
-          kubectl get events -n "$NAMESPACE" --sort-by='.lastTimestamp' | tail -100 || true
-
-          echo "=== PODS ==="
-          kubectl get pods -n "$NAMESPACE" -o wide || true
-
-          echo "=== WEB DEPLOYMENT ==="
-          kubectl describe deployment "$WEB_DEPLOYMENT" -n "$NAMESPACE" || true
-
-          echo "=== WEB LOGS ==="
-          kubectl logs deployment/"$WEB_DEPLOYMENT" -n "$NAMESPACE" --tail=200 --prefix=true || true
-
-      # ============================================================
-      # SUCCESS
-      # ============================================================
-
-      - name: Deployment successful
-        run: |
-          echo "=========================================="
-          echo "TEAMWEVA DEPLOYMENT SUCCESSFUL"
-          echo "=========================================="
-          echo "Namespace: $NAMESPACE"
-          echo "Image:     ${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-          echo "Public:    http://107.170.28.69:30082"
+          echo "Deployment manifest pushed successfully."
+          echo "ArgoCD will automatically reconcile and deploy to Kubernetes."
           echo "=========================================="
