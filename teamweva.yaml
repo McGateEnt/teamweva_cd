@@ -296,7 +296,7 @@ spec:
         - operator: "Exists"
       containers:
         - name: web
-          image: mcgatehub/teamweva:9f80533fc4bf3ffdd497f06f16b8e776c8bda270
+          image: mcgatehub/teamweva:a904faaaeed9f7dde4a6ecd45946bd130fae6f77
           imagePullPolicy: Always
 
           ports:
