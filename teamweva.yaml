@@ -144,6 +144,10 @@ spec:
         app: teamweva-postgres
 
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker-02
+      tolerations:
+        - operator: "Exists"
       containers:
         - name: postgres
           image: postgres:16-alpine
@@ -155,6 +159,9 @@ spec:
               protocol: TCP
 
           env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
@@ -201,8 +208,8 @@ spec:
 
           resources:
             requests:
-              cpu: "200m"
-              memory: "256Mi"
+              cpu: "50m"
+              memory: "128Mi"
             limits:
               cpu: "1"
               memory: "1Gi"
@@ -283,6 +290,10 @@ spec:
         tier: application
 
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker-02
+      tolerations:
+        - operator: "Exists"
       containers:
         - name: web
           image: mcgatehub/teamweva:9f80533fc4bf3ffdd497f06f16b8e776c8bda270
@@ -354,8 +365,8 @@ spec:
 
           resources:
             requests:
-              cpu: "250m"
-              memory: "384Mi"
+              cpu: "50m"
+              memory: "128Mi"
             limits:
               cpu: "1.5"
               memory: "1.5Gi"
