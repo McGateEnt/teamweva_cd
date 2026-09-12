@@ -32,6 +32,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+          token: ${{ secrets.CD_REPO_TOKEN || secrets.GITHUB_TOKEN }}
 
       # ============================================================
       # VALIDATE PAYLOAD
