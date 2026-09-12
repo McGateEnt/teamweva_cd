@@ -274,7 +274,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: mcgatehub/teamweva:034c8652370e870e68af251a954d2382b9a612ff
+          image: mcgatehub/teamweva:f706469e02817ae4fde005c7405bfb43e1f05a2f
           imagePullPolicy: Always
 
           ports:
