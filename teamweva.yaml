@@ -1,0 +1,442 @@
+# ============================================================
+# TeamWeva Kubernetes Production Manifest
+# Namespace: mcgate (Shared cluster with MyClan and StorePro)
+# Target Cluster: k8s-cp-01 (107.170.28.69)
+# Repository: https://github.com/McGateEnt/teamweva_cd.git
+# ============================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcgate
+
+---
+# ============================================================
+# TeamWeva ConfigMap
+# ============================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: teamweva-config
+  namespace: mcgate
+
+data:
+  DJANGO_SETTINGS_MODULE: "mcgate_backend.settings"
+
+  # ----------------------------------------------------------
+  # Django ALLOWED_HOSTS
+  # Include k8s service dns, localhost, and public cluster IP
+  # ----------------------------------------------------------
+  ALLOWED_HOSTS: "107.170.28.69,localhost,127.0.0.1,teamweva-web,teamweva-web.mcgate.svc,teamweva-web.mcgate.svc.cluster.local,teamweva.mcgate.app,teamweva.xentraldesk.com"
+
+  # ----------------------------------------------------------
+  # Database Configuration (PostgreSQL)
+  # ----------------------------------------------------------
+  DB_HOST: "teamweva-postgres"
+  DB_PORT: "5432"
+
+  # ----------------------------------------------------------
+  # File Storage
+  # ----------------------------------------------------------
+  USE_S3: "False"
+  MEDIA_ROOT: "/app/media"
+  STATIC_ROOT: "/app/backend/staticfiles"
+
+  # ----------------------------------------------------------
+  # Security & Proxy Settings
+  # ----------------------------------------------------------
+  SECURE_SSL_REDIRECT: "False"
+
+  # ----------------------------------------------------------
+  # Gunicorn Server Tuning
+  # ----------------------------------------------------------
+  PORT: "8000"
+  GUNICORN_BIND: "0.0.0.0:8000"
+  GUNICORN_WORKERS: "3"
+  GUNICORN_THREADS: "2"
+  GUNICORN_TIMEOUT: "120"
+
+  # ----------------------------------------------------------
+  # CORS & CSRF Whitelist
+  # ----------------------------------------------------------
+  CORS_ALLOWED_ORIGINS: "http://107.170.28.69,https://107.170.28.69,http://107.170.28.69:30082,http://localhost:5173,http://localhost:8000,http://127.0.0.1:8000,https://teamweva.mcgate.app,https://teamweva.xentraldesk.com"
+  CSRF_TRUSTED_ORIGINS: "http://107.170.28.69,https://107.170.28.69,http://107.170.28.69:30082,http://localhost:5173,http://localhost:8000,http://127.0.0.1:8000,https://teamweva.mcgate.app,https://teamweva.xentraldesk.com"
+  PUBLIC_BASE_URL: "http://107.170.28.69:30082"
+
+  # ----------------------------------------------------------
+  # Python Runtime
+  # ----------------------------------------------------------
+  PYTHONUNBUFFERED: "1"
+  PYTHONPATH: "/app/backend:/app/backend/apps"
+
+---
+# ============================================================
+# TeamWeva Secret
+# ============================================================
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: teamweva-secret
+  namespace: mcgate
+type: Opaque
+stringData:
+  SECRET_KEY: "teamweva-enterprise-super-secret-key-2026-!prod"
+  DB_NAME: "teamweva_db"
+  DB_USER: "teamweva_user"
+  DB_PASSWORD: "TeamWevaProd@2026!"
+
+---
+# ============================================================
+# PostgreSQL Persistent Volume Claim
+# ============================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: teamweva-postgres-data
+  namespace: mcgate
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# ============================================================
+# PostgreSQL Deployment
+# ============================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: teamweva-postgres
+  namespace: mcgate
+  labels:
+    app: teamweva-postgres
+
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app: teamweva-postgres
+
+  template:
+    metadata:
+      labels:
+        app: teamweva-postgres
+
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: teamweva-secret
+                  key: DB_NAME
+
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: teamweva-secret
+                  key: DB_USER
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: teamweva-secret
+                  key: DB_PASSWORD
+
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: teamweva-postgres-data
+
+---
+# ============================================================
+# PostgreSQL Service
+# ============================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: teamweva-postgres
+  namespace: mcgate
+spec:
+  type: ClusterIP
+  selector:
+    app: teamweva-postgres
+  ports:
+    - name: postgres
+      protocol: TCP
+      port: 5432
+      targetPort: 5432
+
+---
+# ============================================================
+# Media Persistent Volume Claim (RWO local-path)
+# ============================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: teamweva-media
+  namespace: mcgate
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# ============================================================
+# TeamWeva Web Deployment (Django 5 + React 19 Vite SPA)
+# ============================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: teamweva-web
+  namespace: mcgate
+  labels:
+    app: teamweva-web
+    tier: application
+
+spec:
+  replicas: 1
+
+  # Recreate strategy is REQUIRED for ReadWriteOnce persistent storage volumes
+  # to prevent volume detachment deadlocks during rolling pod boot
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app: teamweva-web
+
+  template:
+    metadata:
+      labels:
+        app: teamweva-web
+        tier: application
+
+    spec:
+      containers:
+        - name: web
+          image: mcgatehub/teamweva:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: teamweva-config
+
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: teamweva-secret
+                  key: SECRET_KEY
+
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: teamweva-secret
+                  key: DB_NAME
+
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: teamweva-secret
+                  key: DB_USER
+
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: teamweva-secret
+                  key: DB_PASSWORD
+
+          volumeMounts:
+            - name: media-volume
+              mountPath: /app/media
+
+          # Readiness Probe: verifies DB connection & application ready
+          readinessProbe:
+            httpGet:
+              path: /ready/
+              port: 8000
+              httpHeaders:
+                - name: Host
+                  value: localhost
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+          # Liveness Probe: verifies Gunicorn process is alive
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+              httpHeaders:
+                - name: Host
+                  value: localhost
+            initialDelaySeconds: 25
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "384Mi"
+            limits:
+              cpu: "1.5"
+              memory: "1.5Gi"
+
+      volumes:
+        - name: media-volume
+          persistentVolumeClaim:
+            claimName: teamweva-media
+
+      # Reference image pull secret for Docker Hub
+      imagePullSecrets:
+        - name: mcgate-dockerhub-secret
+
+---
+# ============================================================
+# ClusterIP Service
+# ============================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: teamweva-web
+  namespace: mcgate
+  labels:
+    app: teamweva-web
+spec:
+  type: ClusterIP
+  selector:
+    app: teamweva-web
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+
+---
+# ============================================================
+# NodePort Service (Direct Public Access on Cluster Node)
+# ============================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: teamweva-nodeport
+  namespace: mcgate
+  labels:
+    app: teamweva-web
+spec:
+  type: NodePort
+  selector:
+    app: teamweva-web
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+      nodePort: 30082
+
+---
+# ============================================================
+# Ingress Gateway (Host/Path Routing)
+# ============================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: teamweva-ingress
+  namespace: mcgate
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+spec:
+  rules:
+    - host: teamweva.mcgate.app
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: teamweva-web
+                port:
+                  number: 8000
+    - host: teamweva.xentraldesk.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: teamweva-web
+                port:
+                  number: 8000
