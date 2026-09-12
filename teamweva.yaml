@@ -70,6 +70,15 @@ data:
   PYTHONUNBUFFERED: "1"
   PYTHONPATH: "/app/backend:/app/backend/apps"
 
+  # ----------------------------------------------------------
+  # SMTP Transactional Email Notification Configuration
+  # ----------------------------------------------------------
+  EMAIL_BACKEND: "django.core.mail.backends.smtp.EmailBackend"
+  EMAIL_HOST: "smtp.gmail.com"
+  EMAIL_PORT: "587"
+  EMAIL_USE_TLS: "True"
+  DEFAULT_FROM_EMAIL: "TeamWeva Workforce <notifications@mcgate.app>"
+
 ---
 # ============================================================
 # TeamWeva Secret
@@ -86,6 +95,8 @@ stringData:
   DB_NAME: "teamweva_db"
   DB_USER: "teamweva_user"
   DB_PASSWORD: "TeamWevaProd@2026!"
+  EMAIL_HOST_USER: ""
+  EMAIL_HOST_PASSWORD: ""
 
 ---
 # ============================================================
@@ -440,3 +451,46 @@ spec:
                 name: teamweva-web
                 port:
                   number: 8000
+
+---
+# ============================================================
+# TeamWeva Due Date & Deadline Alerts CronJob (Hourly)
+# ============================================================
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: teamweva-due-date-alerts
+  namespace: mcgate
+spec:
+  schedule: "0 * * * *"
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: teamweva-due-date-alerts
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            kubernetes.io/hostname: k8s-worker-02
+          containers:
+            - name: due-date-scanner
+              image: ghcr.io/mcgateent/teamweva:latest
+              imagePullPolicy: Always
+              command: ["python", "backend/manage.py", "send_due_date_alerts"]
+              envFrom:
+                - configMapRef:
+                    name: teamweva-config
+                - secretRef:
+                    name: teamweva-secret
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "96Mi"
+                limits:
+                  cpu: "200m"
+                  memory: "256Mi"
