@@ -21,7 +21,7 @@ concurrency:
 jobs:
   update-deployment:
     name: Deploy TeamWeva
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     env:
       IMAGE_REGISTRY: mcgatehub
