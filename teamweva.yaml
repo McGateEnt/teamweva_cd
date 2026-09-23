@@ -490,7 +490,7 @@ spec:
             kubernetes.io/hostname: k8s-worker-02
           containers:
             - name: due-date-scanner
-              image: ghcr.io/mcgateent/teamweva:latest
+              image: mcgatehub/teamweva:be3d3a6d2cc8b0bce66396b60f8d8bb7e9935d05
               imagePullPolicy: Always
               command: ["python", "backend/manage.py", "send_due_date_alerts"]
               envFrom:
