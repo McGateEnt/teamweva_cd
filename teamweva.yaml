@@ -296,7 +296,7 @@ spec:
         - operator: "Exists"
       containers:
         - name: web
-          image: mcgatehub/teamweva:9726d49e7b4d38343c8eab1f3e55e559c036d545
+          image: mcgatehub/teamweva:262e91b8a47d07ee7181a445ec93fe67d03feb28
           imagePullPolicy: Always
 
           ports:
@@ -490,7 +490,7 @@ spec:
             kubernetes.io/hostname: k8s-worker-02
           containers:
             - name: due-date-scanner
-              image: mcgatehub/teamweva:9726d49e7b4d38343c8eab1f3e55e559c036d545
+              image: mcgatehub/teamweva:262e91b8a47d07ee7181a445ec93fe67d03feb28
               imagePullPolicy: Always
               command: ["python", "backend/manage.py", "send_due_date_alerts"]
               envFrom:
