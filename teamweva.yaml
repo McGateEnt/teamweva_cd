@@ -1,7 +1,7 @@
 # ============================================================
 # TeamWeva Kubernetes Production Manifest
 # Namespace: mcgate (Shared cluster with MyClan and StorePro)
-# Target Cluster: k8s-cp-01 (107.170.28.69)
+# Target Cluster: k8s-cp-01 (162.243.85.63)
 # Repository: https://github.com/McGateEnt/teamweva_cd.git
 # ============================================================
 
@@ -28,7 +28,7 @@ data:
   # Django ALLOWED_HOSTS
   # Include k8s service dns, localhost, and public cluster IP
   # ----------------------------------------------------------
-  ALLOWED_HOSTS: "107.170.28.69,localhost,127.0.0.1,teamweva-web,teamweva-web.mcgate.svc,teamweva-web.mcgate.svc.cluster.local,teamweva.mcgate.app,teamweva.xentraldesk.com"
+  ALLOWED_HOSTS: "162.243.85.63,107.170.28.69,localhost,127.0.0.1,teamweva-web,teamweva-web.mcgate.svc,teamweva-web.mcgate.svc.cluster.local,teamweva.mcgate.app,teamweva.xentraldesk.com"
 
   # ----------------------------------------------------------
   # Database Configuration (PostgreSQL)
@@ -60,9 +60,9 @@ data:
   # ----------------------------------------------------------
   # CORS & CSRF Whitelist
   # ----------------------------------------------------------
-  CORS_ALLOWED_ORIGINS: "http://107.170.28.69,https://107.170.28.69,http://107.170.28.69:30085,http://localhost:5173,http://localhost:8000,http://127.0.0.1:8000,https://teamweva.mcgate.app,https://teamweva.xentraldesk.com"
-  CSRF_TRUSTED_ORIGINS: "http://107.170.28.69,https://107.170.28.69,http://107.170.28.69:30085,http://localhost:5173,http://localhost:8000,http://127.0.0.1:8000,https://teamweva.mcgate.app,https://teamweva.xentraldesk.com"
-  PUBLIC_BASE_URL: "http://107.170.28.69:30085"
+  CORS_ALLOWED_ORIGINS: "http://162.243.85.63,https://162.243.85.63,http://162.243.85.63:30085,http://107.170.28.69,https://107.170.28.69,http://107.170.28.69:30085,http://localhost:5173,http://localhost:8000,http://127.0.0.1:8000,https://teamweva.mcgate.app,http://teamweva.xentraldesk.com,https://teamweva.xentraldesk.com"
+  CSRF_TRUSTED_ORIGINS: "http://162.243.85.63,https://162.243.85.63,http://162.243.85.63:30085,http://107.170.28.69,https://107.170.28.69,http://107.170.28.69:30085,http://localhost:5173,http://localhost:8000,http://127.0.0.1:8000,https://teamweva.mcgate.app,http://teamweva.xentraldesk.com,https://teamweva.xentraldesk.com"
+  PUBLIC_BASE_URL: "http://162.243.85.63:30085"
 
   # ----------------------------------------------------------
   # Python Runtime
